@@ -71,65 +71,57 @@ def discord(source, section, title, link):
 
 
 def telegram(source, section, title, link):
-    if CONFIG['keys']['telegram']['enabled']:
-        site = requests.get(link, headers={'User-Agent': 'fourjr/rss-feed-bot'})
-        soup = BeautifulSoup(site.content, 'lxml')
-        image_data = soup.find('meta', property='og:image')
+    if not CONFIG['keys']['telegram']['enabled']:
+        return
+    site = requests.get(link, headers={'User-Agent': 'fourjr/rss-feed-bot'})
+    soup = BeautifulSoup(site.content, 'lxml')
+    image_data = soup.find('meta', property='og:image')
 
-        is_premium = soup.find('div', {'class': 'premium-read-more'})
-        if is_premium:
-            title = '[Premium] ' + title
+    if is_premium := soup.find('div', {'class': 'premium-read-more'}):
+        title = f'[Premium] {title}'
 
-        if image_data:
-            image = image_data['content']
-        else:
-            image = None
+    image = image_data['content'] if image_data else None
+    message = f'#{source} ' if source else ''
+    message += f'#{section} {title}'
 
-        if source:
-            message = f'#{source} '
-        else:
-            message = ''
+    if image in CONFIG['config'].get('block_images', []):
+        image = None
 
-        message += f'#{section} {title}'
-
-        if image in CONFIG['config'].get('block_images', []):
-            image = None
-
-        data = {
-            'chat_id': CONFIG['keys']['telegram']['chat_id'],
-            'reply_markup': {
-                'inline_keyboard': [
-                    [{
-                        'text': 'Read More',
-                        'url': link
-                    }]
-                ]
-            }
+    data = {
+        'chat_id': CONFIG['keys']['telegram']['chat_id'],
+        'reply_markup': {
+            'inline_keyboard': [
+                [{
+                    'text': 'Read More',
+                    'url': link
+                }]
+            ]
         }
+    }
 
-        if image is None:
-            data['text'] = message
-            endpoint = 'Message'
+    if image is None:
+        data['text'] = message
+        endpoint = 'Message'
+    else:
+        data['photo'] = image
+        data['caption'] = message
+        endpoint = 'Photo'
+
+    r = requests.post(
+        f'https://api.telegram.org/bot{CONFIG["keys"]["telegram"]["bot_token"]}/send{endpoint}',
+        json=data
+    )
+    if r.status_code == 429:
+        try:
+            retry_after = r.json()['parameters']['retry_after']
+        except KeyError:
+            pass
         else:
-            data['photo'] = image
-            data['caption'] = message
-            endpoint = 'Photo'
+            time.sleep(retry_after)
+            return telegram(source, section, title, link)  # retry
 
-        r = requests.post(
-            f'https://api.telegram.org/bot{CONFIG["keys"]["telegram"]["bot_token"]}/send{endpoint}',
-            json=data
-        )
-        if r.status_code == 429:
-            try:
-                retry_after = r.json()['parameters']['retry_after']
-            except KeyError:
-                pass
-            else:
-                time.sleep(retry_after)
-                return telegram(source, section, title, link)  # retry
-
-        if r.status_code != 200:
-            print(f'Error posting {link} to telegram: {r.status_code} - {r.text}')
+    if r.status_code != 200:
+        print(f'Error posting {link} to telegram: {r.status_code} - {r.text}')
 
 
 try:
